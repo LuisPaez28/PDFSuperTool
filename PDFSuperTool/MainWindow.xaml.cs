@@ -6,7 +6,9 @@ using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
 
-// Alias para PDF (Separar/Unir)
+// ==========================================
+// PARTE 1: Librerías Nativas de C# (Rápidas para Separar/Unir)
+// ==========================================
 using SharpDoc = PdfSharp.Pdf.PdfDocument;
 using PdfSharp.Pdf.IO;
 
@@ -22,7 +24,7 @@ namespace PDFSuperTool
         }
 
         // ==========================================
-        // 1. SEPARAR PDF (Funciona perfecto)
+        // 1. SEPARAR PDF (Usamos C# nativo porque es rapidísimo)
         // ==========================================
         private async void BtnSeparar_Click(object sender, RoutedEventArgs e)
         {
@@ -43,12 +45,12 @@ namespace PDFSuperTool
 
             if (sfd.ShowDialog() == true)
             {
-                string carpetaDestino = Path.GetDirectoryName(sfd.FileName);
-                string nombreBase = Path.GetFileNameWithoutExtension(pdfPath);
+                string carpeta = Path.GetDirectoryName(sfd.FileName);
+                string baseName = Path.GetFileNameWithoutExtension(pdfPath);
 
                 try
                 {
-                    lblStatus.Text = "Procesando...";
+                    lblStatus.Text = "Separando (Motor C#)...";
                     await Task.Run(() =>
                     {
                         using (SharpDoc input = PdfReader.Open(pdfPath, PdfDocumentOpenMode.Import))
@@ -58,7 +60,7 @@ namespace PDFSuperTool
                                 using (SharpDoc output = new SharpDoc())
                                 {
                                     output.AddPage(input.Pages[i]);
-                                    output.Save(Path.Combine(carpetaDestino, $"{nombreBase}_pag_{i + 1}.pdf"));
+                                    output.Save(Path.Combine(carpeta, $"{baseName}_pag_{i + 1}.pdf"));
                                 }
                             }
                         }
@@ -71,7 +73,7 @@ namespace PDFSuperTool
         }
 
         // ==========================================
-        // 2. UNIR PDF (Funciona perfecto)
+        // 2. UNIR PDF (Usamos C# nativo porque es rapidísimo)
         // ==========================================
         private async void BtnUnir_Click(object sender, RoutedEventArgs e)
         {
@@ -86,7 +88,7 @@ namespace PDFSuperTool
             {
                 try
                 {
-                    lblStatus.Text = "Uniendo...";
+                    lblStatus.Text = "Uniendo (Motor C#)...";
                     string salida = sfd.FileName;
                     await Task.Run(() =>
                     {
@@ -108,179 +110,195 @@ namespace PDFSuperTool
         }
 
         // ==========================================
-        // 3. CONVERTIR (SOLUCIÓN BLINDADA FINAL)
+        // 3. CONVERTIR (Usamos PYTHON porque es más inteligente)
         // ==========================================
         private async void BtnConvertir_Click(object sender, RoutedEventArgs e)
         {
             string pdfPath = txtPathConvert.Text;
             bool esExcel = chkEsExcel.IsChecked ?? false;
 
-            // Validaciones iniciales
             if (string.IsNullOrEmpty(pdfPath) || !File.Exists(pdfPath))
             {
                 MessageBox.Show("Selecciona el PDF a convertir.");
                 return;
             }
 
-            string rutaLibreOffice = BuscarLibreOffice();
-            if (string.IsNullOrEmpty(rutaLibreOffice))
+            // Validar si Python existe
+            string pythonPath = ObtenerRutaPython();
+            if (string.IsNullOrEmpty(pythonPath))
             {
-                MessageBox.Show("No encontré LibreOffice. Verifica la instalación.");
+                MessageBox.Show("No encontré Python instalado.\nInstálalo y ejecuta: pip install pdf2docx pandas pdfplumber openpyxl");
                 return;
             }
 
-            // 1. Matar procesos viejos para liberar memoria
-            MatarProcesosLibreOffice();
-
-            // 2. Preguntar dónde guardar el archivo final
             SaveFileDialog sfd = new SaveFileDialog
             {
-                Title = "Selecciona dónde guardar el resultado",
+                Title = "Guardar archivo convertido",
                 Filter = esExcel ? "Excel (*.xlsx)|*.xlsx" : "Word (*.docx)|*.docx",
-                FileName = Path.GetFileNameWithoutExtension(pdfPath) // Sugerir nombre original
+                FileName = Path.GetFileNameWithoutExtension(pdfPath)
             };
 
             if (sfd.ShowDialog() == true)
             {
-                string rutaDestinoFinal = sfd.FileName;
-
-                // 3. Crear carpeta TEMP del sistema (Segura y sin espacios raros)
-                string carpetaTempSistema = Path.Combine(Path.GetTempPath(), "PDFTool_" + DateTime.Now.Ticks);
-                Directory.CreateDirectory(carpetaTempSistema);
-
-                // 4. Copiar PDF original a la Temp llamándolo "Input.pdf" 
-                // (Esto evita errores si tu archivo original tiene nombres raros)
-                string pdfTemporal = Path.Combine(carpetaTempSistema, "Input.pdf");
-                File.Copy(pdfPath, pdfTemporal, true);
-
-                lblStatus.Text = "Convirtiendo...";
+                string rutaSalida = sfd.FileName;
+                lblStatus.Text = "Procesando con Python (IA)...";
 
                 try
                 {
                     await Task.Run(() =>
                     {
-                        // Convertimos el "Input.pdf"
-                        ConvertirConLibreOffice(rutaLibreOffice, pdfTemporal, carpetaTempSistema, esExcel);
-
-                        // Pequeña espera técnica
-                        System.Threading.Thread.Sleep(1500);
+                        EjecutarScriptPython(pythonPath, pdfPath, rutaSalida, esExcel);
                     });
 
-                    // 5. Buscar el resultado (se llamará Input.xlsx o Input.docx)
-                    string extension = esExcel ? ".xlsx" : ".docx";
-                    string archivoGeneradoTemp = Path.Combine(carpetaTempSistema, "Input" + extension);
-
-                    if (File.Exists(archivoGeneradoTemp))
-                    {
-                        // 6. Mover el archivo generado a donde pidió el usuario
-                        if (File.Exists(rutaDestinoFinal)) File.Delete(rutaDestinoFinal);
-                        File.Move(archivoGeneradoTemp, rutaDestinoFinal);
-
-                        MessageBox.Show("¡Conversión Exitosa!");
-
-                        // Abrir explorador
-                        Process.Start("explorer.exe", $"/select,\"{rutaDestinoFinal}\"");
-                    }
-                    else
-                    {
-                        // Debugging: ver qué pasó si falló
-                        string[] archivos = Directory.GetFiles(carpetaTempSistema);
-                        string lista = string.Join("\n", archivos);
-                        MessageBox.Show($"Error: LibreOffice terminó pero no generó el archivo esperado.\nContenido carpeta temp:\n{lista}");
-                    }
+                    MessageBox.Show("¡Conversión Exitosa!");
+                    try { Process.Start("explorer.exe", $"/select,\"{rutaSalida}\""); } catch { }
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Error crítico: " + ex.Message);
+                    MessageBox.Show("Error en Python:\n" + ex.Message);
                 }
                 finally
                 {
-                    // Limpieza: Borrar carpeta temp
-                    try { if (Directory.Exists(carpetaTempSistema)) Directory.Delete(carpetaTempSistema, true); } catch { }
                     lblStatus.Text = "Listo.";
                 }
             }
         }
 
         // ==========================================
-        // HELPERS (FUNCIONES DE APOYO)
+        // LÓGICA DE PUENTE C# <-> PYTHON
         // ==========================================
-
-        private void MatarProcesosLibreOffice()
+        private void EjecutarScriptPython(string pythonExe, string inputPdf, string output, bool esExcel)
         {
+            string scriptContent = GenerarCodigoPython(esExcel);
+            string tempScriptPath = Path.Combine(Path.GetTempPath(), "convertidor_temp.py");
+
+            // Escribimos el script .py en el disco temporalmente
+            File.WriteAllText(tempScriptPath, scriptContent);
+
+            // Argumentos con comillas para proteger espacios
+            string argumentos = $"\"{tempScriptPath}\" \"{inputPdf}\" \"{output}\"";
+
+            ProcessStartInfo start = new ProcessStartInfo
+            {
+                FileName = pythonExe,
+                Arguments = argumentos,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using (Process process = Process.Start(start))
+            {
+                string errors = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+
+                // Borramos el script temporal
+                try { File.Delete(tempScriptPath); } catch { }
+
+                if (process.ExitCode != 0)
+                {
+                    throw new Exception($"El script de Python falló:\n{errors}");
+                }
+            }
+        }
+
+        private string GenerarCodigoPython(bool paraExcel)
+        {
+            if (!paraExcel)
+            {
+                // Script para WORD (pdf2docx)
+                return @"
+import sys
+from pdf2docx import Converter
+
+def main(pdf_file, docx_file):
+    try:
+        cv = Converter(pdf_file)
+        cv.convert(docx_file, start=0, end=None)
+        cv.close()
+    except Exception as e:
+        print(f'ERROR: {e}', file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main(sys.argv[1], sys.argv[2])
+";
+            }
+            else
+            {
+                // Script para EXCEL (pdfplumber + pandas)
+                return @"
+import sys
+import pdfplumber
+import pandas as pd
+
+def main(pdf_file, xlsx_file):
+    try:
+        all_tables = []
+        with pdfplumber.open(pdf_file) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                for table in tables:
+                    # Ignorar tablas vacías o rotas
+                    if table:
+                        # Convertir a DataFrame. Usamos la fila 0 como headers
+                        df = pd.DataFrame(table[1:], columns=table[0])
+                        all_tables.append(df)
+        
+        if not all_tables:
+            print('No se detectaron tablas claras en el PDF.', file=sys.stderr)
+            sys.exit(1)
+
+        final_df = pd.concat(all_tables, ignore_index=True)
+        final_df.to_excel(xlsx_file, index=False)
+
+    except Exception as e:
+        print(f'ERROR: {e}', file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main(sys.argv[1], sys.argv[2])
+";
+            }
+        }
+
+        private string ObtenerRutaPython()
+        {
+            // Intenta detectar el comando 'python' global
             try
             {
-                foreach (var proc in Process.GetProcessesByName("soffice")) proc.Kill();
-                foreach (var proc in Process.GetProcessesByName("soffice.bin")) proc.Kill();
+                ProcessStartInfo psi = new ProcessStartInfo("python", "--version") { UseShellExecute = false, CreateNoWindow = true };
+                Process.Start(psi).WaitForExit();
+                return "python";
             }
-            catch { /* Ignorar errores de permisos */ }
-        }
-
-        private void ConvertirConLibreOffice(string exePath, string inputFile, string outputDir, bool esExcel)
-        {
-            string formato = esExcel ? "xlsx" : "docx";
-
-            // Perfil temporal limpio para evitar errores de configuración
-            string userProfileTemp = Path.Combine(outputDir, "user_profile");
-
-            // Argumentos blindados
-            string args = $"-env:UserInstallation=\"file:///{userProfileTemp.Replace(@"\", "/")}\" --headless --convert-to {formato} --outdir \"{outputDir}\" \"{inputFile}\"";
-
-            ProcessStartInfo startInfo = new ProcessStartInfo
+            catch
             {
-                FileName = exePath,
-                Arguments = args,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardError = true
-            };
-
-            using (Process process = Process.Start(startInfo))
-            {
-                process.WaitForExit();
+                // Búsqueda manual si no está en el PATH
+                string[] rutas = { @"C:\Python39\python.exe", @"C:\Python310\python.exe", @"C:\Python311\python.exe", @"C:\Python312\python.exe" };
+                foreach (var r in rutas) if (File.Exists(r)) return r;
+                return null;
             }
         }
 
-        private string BuscarLibreOffice()
-        {
-            string[] rutas = {
-                @"C:\Program Files\LibreOffice\program\soffice.exe",
-                @"C:\Program Files (x86)\LibreOffice\program\soffice.exe"
-            };
-            foreach (var r in rutas) if (File.Exists(r)) return r;
-            return null;
-        }
-
-        // Botones de UI (Seleccionar, Limpiar, etc.)
+        // Helpers UI
         private void BtnSeleccionar_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog ofd = new OpenFileDialog { Filter = "PDF|*.pdf" };
             if (ofd.ShowDialog() == true) txtPathSplit.Text = ofd.FileName;
         }
-
         private void BtnAgregarALista_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog ofd = new OpenFileDialog { Multiselect = true, Filter = "PDF|*.pdf" };
             if (ofd.ShowDialog() == true)
             {
-                foreach (string f in ofd.FileNames)
-                {
-                    archivosParaUnir.Add(f);
-                    listArchivosUnir.Items.Add(Path.GetFileName(f));
-                }
+                foreach (string f in ofd.FileNames) { archivosParaUnir.Add(f); listArchivosUnir.Items.Add(Path.GetFileName(f)); }
             }
         }
-
         private void BtnLimpiar_Click(object sender, RoutedEventArgs e)
         {
-            archivosParaUnir.Clear();
-            listArchivosUnir.Items.Clear();
-            txtPathSplit.Clear();
-            txtPathConvert.Clear();
-            lblStatus.Text = "Limpiado.";
+            archivosParaUnir.Clear(); listArchivosUnir.Items.Clear(); txtPathSplit.Clear(); txtPathConvert.Clear(); lblStatus.Text = "Limpiado.";
         }
-
         private void BtnSeleccionarConvert_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog ofd = new OpenFileDialog { Filter = "PDF|*.pdf" };
