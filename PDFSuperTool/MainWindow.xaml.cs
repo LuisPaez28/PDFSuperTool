@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics; // Necesario para ejecutar LibreOffice
+using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
-using Microsoft.Win32; // Aquí están los diálogos nativos de WPF
+using Microsoft.Win32;
 
-// Alias para PDF (Separar/Unir) - Mantenemos esto que sí funcionaba
+// Alias para PDF (Separar/Unir)
 using SharpDoc = PdfSharp.Pdf.PdfDocument;
 using PdfSharp.Pdf.IO;
 
@@ -22,7 +22,7 @@ namespace PDFSuperTool
         }
 
         // ==========================================
-        // 1. SEPARAR PDF (Sin cambios, funciona bien)
+        // 1. SEPARAR PDF (Funciona perfecto)
         // ==========================================
         private async void BtnSeparar_Click(object sender, RoutedEventArgs e)
         {
@@ -71,7 +71,7 @@ namespace PDFSuperTool
         }
 
         // ==========================================
-        // 2. UNIR PDF (Sin cambios, funciona bien)
+        // 2. UNIR PDF (Funciona perfecto)
         // ==========================================
         private async void BtnUnir_Click(object sender, RoutedEventArgs e)
         {
@@ -108,111 +108,123 @@ namespace PDFSuperTool
         }
 
         // ==========================================
-        // 3. CONVERTIR (CORREGIDO: 100% WPF NATIVO)
+        // 3. CONVERTIR (SOLUCIÓN BLINDADA FINAL)
         // ==========================================
         private async void BtnConvertir_Click(object sender, RoutedEventArgs e)
         {
             string pdfPath = txtPathConvert.Text;
             bool esExcel = chkEsExcel.IsChecked ?? false;
 
-            // 1. Validaciones
+            // Validaciones iniciales
             if (string.IsNullOrEmpty(pdfPath) || !File.Exists(pdfPath))
             {
-                MessageBox.Show("Por favor, selecciona el PDF a convertir.");
+                MessageBox.Show("Selecciona el PDF a convertir.");
                 return;
             }
 
             string rutaLibreOffice = BuscarLibreOffice();
             if (string.IsNullOrEmpty(rutaLibreOffice))
             {
-                MessageBox.Show("No encontré LibreOffice.");
+                MessageBox.Show("No encontré LibreOffice. Verifica la instalación.");
                 return;
             }
 
-            // 2. Elegir carpeta destino
+            // 1. Matar procesos viejos para liberar memoria
+            MatarProcesosLibreOffice();
+
+            // 2. Preguntar dónde guardar el archivo final
             SaveFileDialog sfd = new SaveFileDialog
             {
-                Title = "Selecciona la carpeta donde guardar",
-                Filter = esExcel ? "Carpeta|*.xlsx" : "Carpeta|*.docx",
-                FileName = "Guardar_Aqui"
+                Title = "Selecciona dónde guardar el resultado",
+                Filter = esExcel ? "Excel (*.xlsx)|*.xlsx" : "Word (*.docx)|*.docx",
+                FileName = Path.GetFileNameWithoutExtension(pdfPath) // Sugerir nombre original
             };
 
             if (sfd.ShowDialog() == true)
             {
-                string carpetaDestino = Path.GetDirectoryName(sfd.FileName);
+                string rutaDestinoFinal = sfd.FileName;
 
-                // Creamos una carpeta temporal única para asegurar que capturamos el archivo correcto
-                string carpetaTemporal = Path.Combine(carpetaDestino, "TEMP_CONVERSION_" + Guid.NewGuid().ToString().Substring(0, 8));
+                // 3. Crear carpeta TEMP del sistema (Segura y sin espacios raros)
+                string carpetaTempSistema = Path.Combine(Path.GetTempPath(), "PDFTool_" + DateTime.Now.Ticks);
+                Directory.CreateDirectory(carpetaTempSistema);
+
+                // 4. Copiar PDF original a la Temp llamándolo "Input.pdf" 
+                // (Esto evita errores si tu archivo original tiene nombres raros)
+                string pdfTemporal = Path.Combine(carpetaTempSistema, "Input.pdf");
+                File.Copy(pdfPath, pdfTemporal, true);
 
                 lblStatus.Text = "Convirtiendo...";
 
                 try
                 {
-                    // Creamos la carpeta temporal (El cuarto aislado)
-                    Directory.CreateDirectory(carpetaTemporal);
-
                     await Task.Run(() =>
                     {
-                        // A. Convertimos y guardamos en la carpeta temporal vacía
-                        ConvertirConLibreOffice(rutaLibreOffice, pdfPath, carpetaTemporal, esExcel);
+                        // Convertimos el "Input.pdf"
+                        ConvertirConLibreOffice(rutaLibreOffice, pdfTemporal, carpetaTempSistema, esExcel);
 
-                        // Esperamos un segundo por seguridad de disco
-                        System.Threading.Thread.Sleep(1000);
+                        // Pequeña espera técnica
+                        System.Threading.Thread.Sleep(1500);
                     });
 
-                    // B. Buscamos qué archivo se creó ahí dentro
-                    string[] archivosGenerados = Directory.GetFiles(carpetaTemporal);
+                    // 5. Buscar el resultado (se llamará Input.xlsx o Input.docx)
+                    string extension = esExcel ? ".xlsx" : ".docx";
+                    string archivoGeneradoTemp = Path.Combine(carpetaTempSistema, "Input" + extension);
 
-                    if (archivosGenerados.Length > 0)
+                    if (File.Exists(archivoGeneradoTemp))
                     {
-                        // ¡Lo encontramos! Es el único archivo en esa carpeta
-                        string archivoTemporal = archivosGenerados[0];
-                        string nombreArchivo = Path.GetFileName(archivoTemporal);
-                        string rutaFinal = Path.Combine(carpetaDestino, nombreArchivo);
+                        // 6. Mover el archivo generado a donde pidió el usuario
+                        if (File.Exists(rutaDestinoFinal)) File.Delete(rutaDestinoFinal);
+                        File.Move(archivoGeneradoTemp, rutaDestinoFinal);
 
-                        // C. Lo movemos a la carpeta real (Sobrescribiendo si existe)
-                        if (File.Exists(rutaFinal)) File.Delete(rutaFinal);
-                        File.Move(archivoTemporal, rutaFinal);
-
-                        // D. Limpieza: Borramos la carpeta temporal
-                        try { Directory.Delete(carpetaTemporal, true); } catch { }
-
-                        MessageBox.Show("¡Éxito! Archivo generado correctamente.");
+                        MessageBox.Show("¡Conversión Exitosa!");
 
                         // Abrir explorador
-                        Process.Start("explorer.exe", $"/select,\"{rutaFinal}\"");
+                        Process.Start("explorer.exe", $"/select,\"{rutaDestinoFinal}\"");
                     }
                     else
                     {
-                        // Si la carpeta sigue vacía, LibreOffice falló silenciosamente
-                        MessageBox.Show("Error extraño: LibreOffice terminó pero no dejó ningún archivo en la carpeta temporal.");
+                        // Debugging: ver qué pasó si falló
+                        string[] archivos = Directory.GetFiles(carpetaTempSistema);
+                        string lista = string.Join("\n", archivos);
+                        MessageBox.Show($"Error: LibreOffice terminó pero no generó el archivo esperado.\nContenido carpeta temp:\n{lista}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Error: " + ex.Message);
+                    MessageBox.Show("Error crítico: " + ex.Message);
                 }
                 finally
                 {
-                    // Aseguramos borrar la carpeta temporal si hubo error y quedó ahí
-                    if (Directory.Exists(carpetaTemporal))
-                    {
-                        try { Directory.Delete(carpetaTemporal, true); } catch { }
-                    }
+                    // Limpieza: Borrar carpeta temp
+                    try { if (Directory.Exists(carpetaTempSistema)) Directory.Delete(carpetaTempSistema, true); } catch { }
                     lblStatus.Text = "Listo.";
                 }
             }
         }
 
         // ==========================================
-        // LÓGICA LIBREOFFICE (CMD)
+        // HELPERS (FUNCIONES DE APOYO)
         // ==========================================
+
+        private void MatarProcesosLibreOffice()
+        {
+            try
+            {
+                foreach (var proc in Process.GetProcessesByName("soffice")) proc.Kill();
+                foreach (var proc in Process.GetProcessesByName("soffice.bin")) proc.Kill();
+            }
+            catch { /* Ignorar errores de permisos */ }
+        }
+
         private void ConvertirConLibreOffice(string exePath, string inputFile, string outputDir, bool esExcel)
         {
             string formato = esExcel ? "xlsx" : "docx";
 
-            // --outdir le dice a LibreOffice: "Guarda el resultado aquí, pero no cambies el nombre del archivo"
-            string args = $"--headless --convert-to {formato} --outdir \"{outputDir}\" \"{inputFile}\"";
+            // Perfil temporal limpio para evitar errores de configuración
+            string userProfileTemp = Path.Combine(outputDir, "user_profile");
+
+            // Argumentos blindados
+            string args = $"-env:UserInstallation=\"file:///{userProfileTemp.Replace(@"\", "/")}\" --headless --convert-to {formato} --outdir \"{outputDir}\" \"{inputFile}\"";
 
             ProcessStartInfo startInfo = new ProcessStartInfo
             {
@@ -221,33 +233,26 @@ namespace PDFSuperTool
                 WindowStyle = ProcessWindowStyle.Hidden,
                 CreateNoWindow = true,
                 UseShellExecute = false,
-                RedirectStandardError = true // Para capturar si LibreOffice se queja
+                RedirectStandardError = true
             };
 
             using (Process process = Process.Start(startInfo))
             {
-                string error = process.StandardError.ReadToEnd();
                 process.WaitForExit();
-
-                if (process.ExitCode != 0)
-                {
-                    throw new Exception($"LibreOffice reportó un error (Código {process.ExitCode}):\n{error}");
-                }
             }
         }
+
         private string BuscarLibreOffice()
         {
-            // Rutas típicas en Windows 64 bits
             string[] rutas = {
                 @"C:\Program Files\LibreOffice\program\soffice.exe",
                 @"C:\Program Files (x86)\LibreOffice\program\soffice.exe"
             };
-
             foreach (var r in rutas) if (File.Exists(r)) return r;
             return null;
         }
 
-        // Helpers UI
+        // Botones de UI (Seleccionar, Limpiar, etc.)
         private void BtnSeleccionar_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog ofd = new OpenFileDialog { Filter = "PDF|*.pdf" };
@@ -280,32 +285,6 @@ namespace PDFSuperTool
         {
             OpenFileDialog ofd = new OpenFileDialog { Filter = "PDF|*.pdf" };
             if (ofd.ShowDialog() == true) txtPathConvert.Text = ofd.FileName;
-        }
-
-        private string BuscarArchivoReciente(string carpeta, bool esExcel, DateTime horaMinima)
-        {
-            // Esperamos un momento para asegurar que el sistema de archivos se actualice
-            System.Threading.Thread.Sleep(1500);
-
-            string patron = esExcel ? "*.xlsx" : "*.docx";
-            DirectoryInfo dirInfo = new DirectoryInfo(carpeta);
-
-            // Obtenemos todos los Excel/Word de la carpeta
-            var archivos = dirInfo.GetFiles(patron);
-
-            // Ordenamos por fecha de modificación (el más nuevo primero)
-            // y filtramos para que solo tome los que se modificaron DESPUÉS de que empezamos el proceso.
-            var archivoReciente = archivos
-                .Where(f => f.LastWriteTime >= horaMinima.AddSeconds(-5) || f.CreationTime >= horaMinima.AddSeconds(-5))
-                .OrderByDescending(f => f.LastWriteTime)
-                .FirstOrDefault();
-
-            if (archivoReciente != null)
-            {
-                return archivoReciente.FullName;
-            }
-
-            return null; // No encontramos nada nuevo
         }
     }
 }
